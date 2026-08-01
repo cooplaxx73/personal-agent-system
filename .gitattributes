@@ -1,0 +1,14 @@
+# Normalise line endings so files stay usable on Linux.
+#
+# Without this, Git for Windows converts to CRLF in the working copy,
+# and a shell script with CRLF fails on Linux with
+# "bad interpreter: /bin/bash^M".
+
+* text=auto
+
+# These run on the Linux VM and must keep LF endings.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf
