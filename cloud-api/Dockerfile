@@ -14,4 +14,7 @@ COPY cloud_api.py reminders_worker.py queue_store.py sent_store.py ./
 ENV REMINDERS_DB=/data/reminders.db
 ENV QUEUE_DB=/data/queue.db
 EXPOSE 8001
-CMD ["uvicorn", "cloud_api:app", "--host", "0.0.0.0", "--port", "8001"]
+# Loopback only. The container runs with network_mode: host, so 0.0.0.0 would
+# publish this on the VM's public IP with nothing but a firewall rule in front
+# of it. Every caller (n8n, the watchdog) is on this host and uses localhost.
+CMD ["uvicorn", "cloud_api:app", "--host", "127.0.0.1", "--port", "8001"]

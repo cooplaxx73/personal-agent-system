@@ -3,12 +3,14 @@ services:
     image: docker.n8n.io/n8nio/n8n:2.30.7
     restart: unless-stopped
     network_mode: host
+    # WEBHOOK_URL and N8N_EDITOR_BASE_URL live in secrets.env -- they expose a
+    # publicly reachable hostname, so they don't belong in a tracked file.
+    env_file:
+      - ./secrets.env
     environment:
       - GENERIC_TIMEZONE=America/Toronto
       - TZ=America/Toronto
       - N8N_SECURE_COOKIE=false
-      - WEBHOOK_URL=https://oracle-vm.tail05bdc3.ts.net/
-      - N8N_EDITOR_BASE_URL=https://oracle-vm.tail05bdc3.ts.net/
     volumes:
       - n8n_data:/home/node/.n8n
   api:
