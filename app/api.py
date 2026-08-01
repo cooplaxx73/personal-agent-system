@@ -116,9 +116,9 @@ def run_onq_reminders(early_days: int = 2):
 
 @app.get("/health/check")
 def health_check():
-    """Check whether onQ session or any Gmail account's token have expired
-    and need re-authentication. Meant to be polled on a schedule and pushed
-    as a Telegram alert when something needs attention."""
+    """Report anything that needs manual re-authentication: an expired onQ
+    calendar feed, or a blocked/expired Queen's SWEP session. Polled on a
+    schedule and pushed as a Telegram alert when something needs attention."""
     issues = []
 
     import onq_ics
@@ -131,12 +131,6 @@ def health_check():
         ok, problem = queens_worker.check_access()
         if not ok:
             issues.append(problem)
-
-    if (WORKERS_DIR / "credentials.json").exists():
-        import gmail_worker
-        for account in gmail_worker.check_all_accounts_valid():
-            issues.append(f"Gmail account '{account}' authentication has expired -- "
-                           f"run gmail_login.py {account} to re-consent")
 
     return {"issues": issues}
 
@@ -413,126 +407,6 @@ def reminders_digest():
     text = ("Good morning, master. Here's your day:\n\n" + "\n\n".join(sections)) if count else ""
     return {"text": text, "count": count}
 
-
-@app.get("/run/gmail")
-def run_gmail():
-    if not (WORKERS_DIR / "credentials.json").exists():
-        return {"error": "Gmail credentials.json not set up yet"}
-    import gmail_worker
-    return {"emails": gmail_worker.fetch_all_accounts()}
-
-
-@app.get("/gmail/summarize")
-def gmail_summarize(days: int = 1, keywords_only: bool = False):
-    """AI-summarize recent important email across all accounts. `days` = how far
-    back (1 = today/last 24h, 7 = the week). By default this covers ALL real mail
-    minus promotions/social/spam/trash; the summarizer ignores anything that's
-    just marketing. Set keywords_only=true to narrow to deadline/interview/exam-
-    type mail. Runs on the free local/gateway model, so it barely uses credit."""
-    if not (WORKERS_DIR / "credentials.json").exists():
-        return {"error": "Gmail not set up yet", "summary": ""}
-    import email_summarizer
-    q = f"newer_than:{days}d -category:promotions -category:social -in:spam -in:trash"
-    if keywords_only:
-        q += " (deadline OR interview OR application OR assignment OR exam OR offer OR meeting)"
-    return email_summarizer.summarize_recent(query=q)
-
-
-@app.get("/organize/gmail")
-def organize_gmail():
-    """Fetch recent emails across all logged-in accounts, categorize them
-    (read-only), and write a note per category into the Obsidian vault --
-    requires OBSIDIAN_VAULT_PATH."""
-    if not (WORKERS_DIR / "credentials.json").exists():
-        return {"error": "Gmail credentials.json not set up yet"}
-    import gmail_worker
-    import gmail_organizer
-    import obsidian_writer
-
-    if not obsidian_writer.VAULT_PATH:
-        return {"error": "OBSIDIAN_VAULT_PATH not set yet -- provide your vault's folder path"}
-
-    emails = gmail_worker.fetch_all_accounts()
-    categorized = gmail_organizer.categorize_emails(emails)
-
-    by_category: dict[str, list[dict]] = {}
-    for e in categorized:
-        by_category.setdefault(e["category"], []).append(e)
-
-    written_paths = []
-    for category, items in by_category.items():
-        lines = []
-        for e in items:
-            action = f" -- **Action:** {e['action_needed']}" if e.get("action_needed") else ""
-            lines.append(f"- **[{e.get('account', '?')}] {e['subject']}** (from {e['from']}){action}")
-        content = "\n".join(lines)
-        path = obsidian_writer.append_note("Emails", category.capitalize(), content)
-        written_paths.append(path)
-
-    return {"categorized": categorized, "notes_written": written_paths}
-
-
-@app.get("/email/accounts")
-def email_accounts():
-    """Which accounts are allowed to send email."""
-    import gmail_worker
-    return {"send_enabled": gmail_worker.SEND_ACCOUNTS}
-
-
-@app.get("/email/draft")
-def email_draft(
-    account: str = Query(..., description="Send-enabled account to send FROM (primary or tech)"),
-    to: str = Query(..., description="Recipient(s), comma-separated"),
-    subject: str = "",
-    body: str = "",
-    attachments: Optional[str] = Query(None, description="Comma-separated file paths to attach"),
-    mode: str = Query("single", description="single | bcc | individual"),
-):
-    """STEP 1 of sending: stage an email for review. Returns a token + a preview
-    to SHOW THE USER. Nothing is sent yet -- only call /email/confirm with this
-    token AFTER the user has reviewed the draft and explicitly said yes."""
-    import gmail_worker
-    import email_drafts
-    if account not in gmail_worker.SEND_ACCOUNTS:
-        return {"error": f"'{account}' can't send. Send-enabled: {gmail_worker.SEND_ACCOUNTS}"}
-    recips = [x.strip() for x in to.split(",") if x.strip()]
-    if not recips:
-        return {"error": "no valid recipients"}
-    atts = [x.strip() for x in attachments.split(",") if x.strip()] if attachments else []
-    if mode not in ("single", "bcc", "individual"):
-        mode = "single"
-    token = email_drafts.create(account, recips, subject, body, atts, mode)
-    return {"token": token, "preview": {
-        "from_account": account, "to": recips, "subject": subject,
-        "body": body, "attachments": atts, "mode": mode}}
-
-
-@app.get("/email/confirm")
-def email_confirm(token: str = Query(..., description="Token from /email/draft, after user confirmed")):
-    """STEP 2: actually send the drafted email. Only call after the user has
-    reviewed the draft from /email/draft and explicitly confirmed."""
-    import gmail_sender
-    import email_drafts
-    d = email_drafts.get(token)
-    if not d:
-        return {"error": "no such draft (already sent, cancelled, or expired)"}
-    if d["mode"] in ("bcc", "individual"):
-        res = gmail_sender.send_bulk(d["account"], d["recipients"], d["subject"],
-                                     d["body"], mode=d["mode"], attachments=d["attachments"])
-    else:
-        res = gmail_sender.send(d["account"], d["recipients"], d["subject"],
-                                d["body"], attachments=d["attachments"])
-    if res.get("sent"):
-        email_drafts.delete(token)
-    return res
-
-
-@app.get("/email/cancel")
-def email_cancel(token: str = Query(..., description="Discard a drafted email without sending")):
-    import email_drafts
-    return {"cancelled": email_drafts.delete(token)}
-
-
 @app.get("/run/all")
 def run_all():
     return {
@@ -540,5 +414,4 @@ def run_all():
         "indeed": run_indeed(),
         "queens": run_queens(),
         "onq": run_onq(),
-        "gmail": run_gmail(),
     }
