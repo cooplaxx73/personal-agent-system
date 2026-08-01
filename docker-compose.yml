@@ -1,0 +1,30 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.30.7
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - GENERIC_TIMEZONE=America/Toronto
+      - TZ=America/Toronto
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=https://oracle-vm.tail05bdc3.ts.net/
+      - N8N_EDITOR_BASE_URL=https://oracle-vm.tail05bdc3.ts.net/
+    volumes:
+      - n8n_data:/home/node/.n8n
+  api:
+    build: ./cloud-api
+    restart: unless-stopped
+    network_mode: host
+    # secrets.env supplies TELEGRAM_NOTIFIER_TOKEN so the API can edit an
+    # already-sent notification (strike a task through when it is completed).
+    env_file:
+      - ./secrets.env
+    environment:
+      - REMINDERS_DB=/data/reminders.db
+      - QUEUE_DB=/data/queue.db
+      - SENT_DB=/data/sent.db
+      - TZ=America/Toronto
+    volumes:
+      - ./cloud-api/data:/data
+volumes:
+  n8n_data:

@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────
+# CREDENTIALS — never commit. These are live.
+# ─────────────────────────────────────────────
+secrets.env
+.env
+*.pem
+*.key
+credentials.json
+token_*.json
+*session*.json
+
+# ─────────────────────────────────────────────
+# PERSONAL DATA — real jobs, reminders, emails
+# ─────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ─────────────────────────────────────────────
+# GENERATED / MACHINE-SPECIFIC
+# ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.log
+venv/
+.venv/
+workers-venv/
+.DS_Store
+Thumbs.db
+
+# ─────────────────────────────────────────────
+# MANUAL BACKUPS — archived, git replaces these
+# ─────────────────────────────────────────────
+*.bak
+*.bak[0-9]
+*.bak-*
+
+# ─────────────────────────────────────────────
+# PERSONAL NOTES — not for the public repo
+# ─────────────────────────────────────────────
+LEARNING-PLAN.md
+HANDOFF.md
+*handoff*.md
