@@ -174,8 +174,8 @@ def queue_process():
 def health_check():
     """Session/token health, used by the re-auth alert. The real checks (onQ,
     Queen's SWEP) live with the workers on :8002; this was hardcoded to an empty list
-    back when they ran on the PC, which silently killed the alert once the PC
-    was retired."""
+    back when they ran on the PC, which silently killed the alert once the
+    PC was retired."""
     issues = (_workers_get("/health/check", {}) or {}).get("issues") or []
     text = ""
     if issues:

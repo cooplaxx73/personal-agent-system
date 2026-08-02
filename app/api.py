@@ -407,11 +407,4 @@ def reminders_digest():
     text = ("Good morning, master. Here's your day:\n\n" + "\n\n".join(sections)) if count else ""
     return {"text": text, "count": count}
 
-@app.get("/run/all")
-def run_all():
-    return {
-        "jobs": run_jobs(),
-        "indeed": run_indeed(),
-        "queens": run_queens(),
-        "onq": run_onq(),
-    }
+
