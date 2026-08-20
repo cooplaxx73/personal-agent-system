@@ -171,8 +171,15 @@ async def chat_completions(request: Request):
             continue
 
         if r.status_code == 200:
-            body = r.json()
-            msg = (body.get("choices") or [{}])[0].get("message") or {}
+            # NOT `body` -- that holds the ORIGINAL REQUEST and is re-read at the
+            # top of this loop to build the next provider's payload. Assigning the
+            # response to it meant an empty-200 fall-through forwarded the previous
+            # provider's RESPONSE as the next provider's REQUEST, which every
+            # provider then rejected ("Unknown name id/object", "specify messages").
+            # Latent since the empty-200 path was added; only fired once a provider
+            # started returning 200-with-no-content instead of an error status.
+            data = r.json()
+            msg = (data.get("choices") or [{}])[0].get("message") or {}
             if not (msg.get("content") or "").strip() and not msg.get("tool_calls"):
                 # 200 but the model said nothing at all -- no text, no tool call.
                 # Useless to the agent, so treat it as a failure and try the next
@@ -184,7 +191,7 @@ async def chat_completions(request: Request):
                 continue
             _stats[name]["ok"] += 1
             _log(f"OK {name} ({p['model']})")
-            out = JSONResponse(content=body)
+            out = JSONResponse(content=data)
             out.headers["X-LLM-Provider"] = name
             out.headers["X-LLM-Model"] = p["model"]
             return out
