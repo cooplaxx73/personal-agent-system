@@ -47,7 +47,11 @@ COOLDOWN_SERVER_ERROR = 30
 PROVIDERS = [
     {"name": "groq", "env": "GROQ_API_KEY",
      "base": "https://api.groq.com/openai/v1",
-     "model": "llama-3.3-70b-versatile"},
+     # llama-3.3-70b-versatile was decommissioned by Groq -- every request 404'd
+     # with model_not_found from ~Aug 2026, silently costing us the fast free rung
+     # (the fall-through kept things working, which is why nobody noticed).
+     # Check `GET /v1/models` on the key before changing this again.
+     "model": "openai/gpt-oss-120b"},
     {"name": "gemini", "env": "GEMINI_API_KEY",
      "base": "https://generativelanguage.googleapis.com/v1beta/openai",
      "model": "gemini-flash-latest"},

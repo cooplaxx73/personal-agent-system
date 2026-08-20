@@ -116,21 +116,21 @@ def run_onq_reminders(early_days: int = 2):
 
 @app.get("/health/check")
 def health_check():
-    """Report anything that needs manual re-authentication: an expired onQ
-    calendar feed, or a blocked/expired Queen's SWEP session. Polled on a
-    schedule and pushed as a Telegram alert when something needs attention."""
+    """Report anything that needs manual re-authentication -- currently just an
+    expired onQ calendar feed. Polled on a schedule and pushed as a Telegram
+    alert when something needs attention.
+
+    The Queen's SWEP check was removed: the VM is permanently Cloudflare-blocked
+    by design (SWEP is scraped via the PC relay instead), so it reported the same
+    known state every single day. An alert you learn to ignore is worse than no
+    alert. Re-add it only if it can report something actionable -- e.g. that the
+    PC relay itself is unreachable."""
     issues = []
 
     import onq_ics
     ok, problem = onq_ics.check_feed_ok()
     if not ok:
         issues.append(problem)
-
-    if (WORKERS_DIR / "queens_session.json").exists():
-        import queens_worker
-        ok, problem = queens_worker.check_access()
-        if not ok:
-            issues.append(problem)
 
     return {"issues": issues}
 

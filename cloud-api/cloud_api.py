@@ -277,12 +277,47 @@ def _day_heading(iso: str) -> str:
         return str(iso)
 
 
+def _describe_when(a: dict) -> str:
+    """Human phrasing for when a freshly added reminder will surface."""
+    if a.get("kind") == "daily":
+        return (f"every day at {_pretty_time(a['fire_time'])}" if a.get("fire_time")
+                else "every day in the morning digest")
+    if a.get("kind") == "weekly":
+        days = reminders_worker.describe_days(a.get("days_of_week"))
+        return (f"{days} at {_pretty_time(a['fire_time'])}" if a.get("fire_time")
+                else f"{days}, in the morning digest")
+    if a.get("kind") == "deadline":
+        return f"due {a.get('due_date')}" + (f", nudging {a['lead_days']}d ahead"
+                                             if a.get("lead_days") else "")
+    return (a.get("due_date") or "today") + (f" at {_pretty_time(a['fire_time'])}"
+                                             if a.get("fire_time") else "")
+
+
+def _add_one(item) -> tuple[bool, str]:
+    """Add a single reminder. Returns (ok, one rendered line, already escaped)."""
+    if not isinstance(item, dict):
+        return False, "couldn't read one of those items"
+    res = reminders_add(
+        text=item.get("text") or "reminder", kind=item.get("kind") or "once",
+        due_date=item.get("due_date"), fire_time=item.get("fire_time"),
+        lead_days=int(item.get("lead_days") or 0),
+        days_of_week=item.get("days_of_week"))
+    if res.get("error"):
+        return False, f"{_esc(item.get('text') or 'that one')} -- {_esc(res['error'])}"
+    a = res.get("added", {})
+    return True, f"{_esc(a.get('text'))} ({_describe_when(a)})"
+
+
 @app.post("/reminders/act")
 async def reminders_act(request: Request):
-    """Run the scheduler bot's JSON: {action: add|list|complete|chat, ...}.
+    """Run the scheduler bot's JSON: {action: add|list|complete|remove|chat, ...},
+    or a JSON LIST of add-objects when one message names several reminders.
     Returns {'text': <finished HTML reply>} for the bot to send as-is. The
     scheduler bot emits JSON instead of using tool-calling (tool schemas were
-    ~90% of its token cost), so all the logic lives here."""
+    ~90% of its token cost), so all the logic lives here.
+
+    Lists are add-only: batching complete/remove would need matching semantics
+    (what if two of three match nothing?) and isn't wanted yet."""
     nl = chr(10)
     raw = (await request.body()).decode("utf-8", "replace").strip()
     if raw.startswith("```"):
@@ -296,31 +331,32 @@ async def reminders_act(request: Request):
         return {"text": _title("Scheduler") + nl + nl
                 + "Sorry master, I didn't catch that -- try 'remind me to email my prof at 5pm tomorrow'."}
 
+    # Several reminders in one message arrive as a JSON array. Partial success is
+    # deliberate: dropping two good reminders because the third was ambiguous
+    # would be worse than saving those two and naming the one that failed.
+    if isinstance(j, list):
+        added, failed = [], []
+        for item in j:
+            ok, line = _add_one(item)
+            (added if ok else failed).append(line)
+        if not added and not failed:
+            return {"text": _title("Scheduler") + nl + nl + "Nothing to add, master."}
+        parts = []
+        if added:
+            parts.append(_title("Reminders Set" if len(added) > 1 else "Reminder Set")
+                         + nl + nl + nl.join(f"- {line}" for line in added))
+        if failed:
+            parts.append("<b>Couldn't set</b>" + nl
+                         + nl.join(f"- {line}" for line in failed))
+        return {"text": (nl + nl).join(parts)}
+
     action = (j.get("action") or "chat").lower()
 
     if action == "add":
-        res = reminders_add(
-            text=j.get("text") or "reminder", kind=j.get("kind") or "once",
-            due_date=j.get("due_date"), fire_time=j.get("fire_time"),
-            lead_days=int(j.get("lead_days") or 0),
-            days_of_week=j.get("days_of_week"))
-        if res.get("error"):
-            return {"text": _title("Hmm") + nl + nl + _esc(res["error"])}
-        a = res.get("added", {})
-        if a.get("kind") == "daily":
-            when = (f"every day at {_pretty_time(a['fire_time'])}" if a.get("fire_time")
-                    else "every day in the morning digest")
-        elif a.get("kind") == "weekly":
-            days = reminders_worker.describe_days(a.get("days_of_week"))
-            when = (f"{days} at {_pretty_time(a['fire_time'])}" if a.get("fire_time")
-                    else f"{days}, in the morning digest")
-        elif a.get("kind") == "deadline":
-            when = f"due {a.get('due_date')}" + (f", nudging {a['lead_days']}d ahead"
-                                                 if a.get("lead_days") else "")
-        else:
-            when = (a.get("due_date") or "today") + (f" at {_pretty_time(a['fire_time'])}"
-                                                     if a.get("fire_time") else "")
-        return {"text": _title("Reminder Set") + nl + nl + f"- {_esc(a.get('text'))} ({when})"}
+        ok, line = _add_one(j)
+        if not ok:
+            return {"text": _title("Hmm") + nl + nl + line}
+        return {"text": _title("Reminder Set") + nl + nl + f"- {line}"}
 
     if action == "list":
         # Title is the timeframe the user asked for (bold, no date suffix), e.g.

@@ -153,11 +153,31 @@ def list_active() -> list[dict]:
 
 
 def complete(reminder_id: int) -> bool:
+    """Mark a reminder done.
+
+    For 'once'/'deadline' that means finished for good. For a RECURRING item it
+    must only mean "done for today" -- setting done = 1 on a daily used to kill
+    the recurrence permanently, because every query filters done = 0. ("take
+    vitamins" was silently dead from 2026-07-25 for exactly this reason.) So
+    recurring items record last_fired instead, which also stops the every-minute
+    poll re-firing them today, and they come back tomorrow.
+    """
     init_db()
+    today = datetime.now().strftime("%Y-%m-%d")
     conn = sqlite3.connect(DB_PATH)
-    # record the completion date too, so purge can time the grace window from it
-    cur = conn.execute("UPDATE reminders SET done = 1, last_fired = ? WHERE id = ?",
-                       (datetime.now().strftime("%Y-%m-%d"), reminder_id))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT kind FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+
+    if row["kind"] in RECURRING_KINDS:
+        cur = conn.execute("UPDATE reminders SET last_fired = ? WHERE id = ?",
+                           (today, reminder_id))
+    else:
+        # record the completion date too, so purge can time the grace window from it
+        cur = conn.execute("UPDATE reminders SET done = 1, last_fired = ? WHERE id = ?",
+                           (today, reminder_id))
     conn.commit()
     ok = cur.rowcount > 0
     conn.close()
@@ -254,14 +274,25 @@ def get_due_now(now: datetime | None = None) -> list[dict]:
     return due
 
 
-def is_done(reminder_id: int) -> bool:
+def is_done(reminder_id: int, now: datetime | None = None) -> bool:
     """Has this reminder been completed? Used when re-rendering an already-sent
-    notification so finished items show struck through."""
+    notification so finished items show struck through.
+
+    Recurring items are never 'done' outright (see complete()), so for those the
+    question is "done TODAY?" -- answered by last_fired. That keeps the
+    strikethrough on today's digest while letting the item return tomorrow."""
     init_db()
+    now = now or datetime.now()
     conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT done FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT kind, done, last_fired FROM reminders WHERE id = ?",
+                       (reminder_id,)).fetchone()
     conn.close()
-    return bool(row and row[0])
+    if row is None:
+        return False
+    if row["kind"] in RECURRING_KINDS:
+        return row["last_fired"] == _today(now)
+    return bool(row["done"])
 
 
 def get_digest_items(now: datetime | None = None) -> list[str]:
