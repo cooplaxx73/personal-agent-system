@@ -9,10 +9,9 @@ ENV TZ=America/Toronto
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY cloud_api.py reminders_worker.py queue_store.py sent_store.py ./
+COPY cloud_api.py reminders_worker.py sent_store.py ./
 
 ENV REMINDERS_DB=/data/reminders.db
-ENV QUEUE_DB=/data/queue.db
 EXPOSE 8001
 # Loopback only. The container runs with network_mode: host, so 0.0.0.0 would
 # publish this on the VM's public IP with nothing but a firewall rule in front

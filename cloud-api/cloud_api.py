@@ -21,12 +21,10 @@ from fastapi import FastAPI, Query, Request
 
 sys.path.insert(0, str(Path(__file__).parent))
 import reminders_worker
-import queue_store
 import sent_store
 
 app = FastAPI()
 
-PC_BASE = os.environ.get("PC_API", "")
 WORKERS_BASE = os.environ.get("WORKERS_API", "http://127.0.0.1:8002")
 
 
@@ -90,99 +88,6 @@ def _workers_get(path: str, default):
         return requests.get(f"{WORKERS_BASE}{path}", timeout=20).json()
     except Exception:  # noqa: BLE001 - a dead worker must not kill the digest
         return default
-
-
-def pc_reachable() -> bool:
-    # fast TCP port check -- doesn't hit the slow /health/check (which does live
-    # session validation and can take ~4s), just confirms the PC API is listening.
-    u = urlparse(PC_BASE)
-    try:
-        with socket.create_connection((u.hostname, u.port or 8001), timeout=4):
-            return True
-    except OSError:
-        return False
-
-
-# --- PC proxy: forward to the PC when it's on, else queue for later ------------
-@app.get("/pc/{path:path}")
-def pc_proxy(path: str, request: Request):
-    """Every PC-dependent tool calls the PC through here. If the PC is reachable
-    we forward and return its result; if it's off we queue the exact call and
-    tell the user, so nothing errors when the PC is asleep."""
-    query = str(request.url.query)
-    label = path.rstrip("/").split("/")[-1]
-    if pc_reachable():
-        try:
-            url = f"{PC_BASE}/{path}" + (f"?{query}" if query else "")
-            return requests.get(url, timeout=180).json()
-        except Exception as e:  # noqa: BLE001 - PC dropped mid-call -> queue it
-            qid = queue_store.add(path, query, label)
-            return {"queued": True, "id": qid,
-                    "message": f"Your PC hiccuped mid-task, so I queued this (#{qid}); "
-                               f"it'll run when the PC's back."}
-    qid = queue_store.add(path, query, label)
-    return {"queued": True, "id": qid,
-            "message": f"Your PC is off right now, so I've queued this (#{qid}). It'll run "
-                       f"automatically when your PC is back — say 'show my queue' anytime."}
-
-
-@app.get("/queue/list")
-def queue_list():
-    return {"queue": queue_store.all_items()}
-
-
-@app.get("/queue/summary")
-def queue_summary():
-    items = queue_store.all_items()
-    if not items:
-        return {"text": "Your queue is empty, master.", "count": 0}
-    lines = [f"#{i['id']} {i['label']}" + (f" ({i['query']})" if i['query'] else "")
-             for i in items]
-    return {"text": "Queued for when your PC is back:\n" + "\n".join(f"- {l}" for l in lines),
-            "count": len(items)}
-
-
-@app.get("/queue/add")
-def queue_add(path: str = Query(...), query: str = ""):
-    return {"added": queue_store.add(path, query)}
-
-
-@app.get("/queue/remove")
-def queue_remove(id: int):
-    return {"removed": queue_store.remove(id)}
-
-
-@app.get("/queue/process")
-def queue_process():
-    """Replay queued PC calls if the PC is back. Called on a schedule."""
-    if not pc_reachable():
-        return {"processed": 0, "reason": "PC still off"}
-    results = []
-    for item in queue_store.all_items():
-        try:
-            url = f"{PC_BASE}/{item['path']}" + (f"?{item['query']}" if item['query'] else "")
-            requests.get(url, timeout=180)
-            queue_store.remove(item["id"])
-            results.append({"id": item["id"], "label": item["label"], "ok": True})
-        except Exception as e:  # noqa: BLE001
-            results.append({"id": item["id"], "label": item["label"], "ok": False, "error": str(e)})
-    return {"processed": sum(1 for x in results if x["ok"]),
-            "still_queued": len(queue_store.all_items()), "results": results}
-
-
-@app.get("/health/check")
-def health_check():
-    """Session/token health, used by the re-auth alert. The only automated check
-    was the onQ calendar feed, removed with onQ itself, so this reports nothing
-    today. The endpoint stays because n8n polls it -- give it something real to
-    check (e.g. whether the PC relay backing Queen's SWEP is reachable) rather
-    than deleting the alert path."""
-    issues = []
-    text = ""
-    if issues:
-        text = (_title("Action Needed") + "\n\nHeads up, master:\n"
-                + "\n".join(f"- {_esc(i)}" for i in issues))
-    return {"issues": issues, "text": text}
 
 
 @app.get("/reminders/add")

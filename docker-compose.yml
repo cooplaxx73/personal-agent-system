@@ -23,7 +23,6 @@ services:
       - ./secrets.env
     environment:
       - REMINDERS_DB=/data/reminders.db
-      - QUEUE_DB=/data/queue.db
       - SENT_DB=/data/sent.db
       - TZ=America/Toronto
     volumes:
