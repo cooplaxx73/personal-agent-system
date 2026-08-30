@@ -6,7 +6,7 @@ unknown until we see it logged in, so the extraction is generic -- expect
 to debug the actual selectors together after you've run queens_login.py.
 
 Reads only your own logged-in view, one page at a time, with real pauses.
-Writes new postings to the vault (Jobs) and dedupes via the shared store.
+Dedupes via the shared job store.
 """
 
 import time
@@ -16,7 +16,6 @@ from playwright.sync_api import sync_playwright
 
 from matching import matches_criteria, looks_blocked
 from job_store import init_db, is_new, mark_seen
-import obsidian_writer
 
 SWEP_URL = "https://careers.sso.queensu.ca/myAccount/swep/SWEP.htm"
 COOKIES_PATH = str(Path(__file__).parent / "queens_session.json")
@@ -47,8 +46,8 @@ def _extract_postings(page) -> list[dict]:
 
 def check_session_valid() -> bool:
     """Does the saved Queen's SWEP session still work, or has it expired and
-    need queens_login.py run again? Mirrors onq_worker.check_session_valid --
-    without this an expired session just returns zero postings and looks like
+    need queens_login.py run again? Without this, an expired session just
+    returns zero postings and looks like
     "no jobs today", which is indistinguishable from working correctly."""
     if not Path(COOKIES_PATH).exists():
         return False
@@ -141,10 +140,6 @@ def run(
                 new_matches.append({"source": "queens-swep", "title": title, "link": link})
 
         browser.close()
-
-    if new_matches and obsidian_writer.VAULT_PATH:
-        lines = [f"- **{m['title']}** (Queen's SWEP) -- {m['link']}" for m in new_matches]
-        obsidian_writer.append_note("Jobs", "New postings found (Queen's SWEP)", "\n".join(lines))
 
     return new_matches
 

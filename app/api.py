@@ -1,11 +1,12 @@
-"""Local API exposing each worker as an HTTP endpoint on the Windows host,
-so n8n (running inside Docker) can trigger them via host.docker.internal
-instead of trying to run scripts directly inside its own container."""
+"""Workers API: exposes each worker as an HTTP endpoint on the VM, so n8n
+(running inside Docker) can trigger them over localhost instead of trying to
+run scripts directly inside its own container.
+
+Job search only. Reminders and the daily digest live in the cloud API on :8001."""
 
 import os
 import requests
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -16,9 +17,7 @@ WORKERS_DIR = Path(__file__).parent / "workers"
 sys.path.insert(0, str(WORKERS_DIR))
 
 import jobs_worker
-import indeed_worker
 import job_store
-import reminders_worker
 
 app = FastAPI()
 
@@ -30,6 +29,14 @@ def _split_terms(raw):
         return None
     parts = [p for p in _re.split(r"[,\s]+", raw) if p.strip()]
     return parts or None
+
+
+@app.get("/health")
+def health():
+    """Liveness only -- the watchdog needs an endpoint that proves this service
+    is answering, not just that the process exists. Deliberately touches no
+    database and no network so a slow scrape can't make the service look down."""
+    return {"ok": True}
 
 
 @app.get("/run/jobs")
@@ -62,33 +69,6 @@ def run_jobs(
                 "timeframe": timeframe or "any"}}
 
 
-def _blocked_reply(source: str) -> dict:
-    """Shape returned when a site's bot-protection refuses this server. Explicit
-    so the agent can explain it, rather than reporting 'no jobs found' (a lie)
-    or leaking a raw 500."""
-    return {"new_matches": [], "blocked": True,
-            "note": (f"{source} is blocking this server's IP address, so that search "
-                     f"can't run from the cloud. Other job sources are unaffected.")}
-
-
-@app.get("/run/indeed")
-def run_indeed(
-    search_query: Optional[str] = None,
-    search_locations: Optional[str] = Query(
-        None, description="Semicolon-separated, e.g. 'Toronto, ON;Kingston, ON'"),
-    role_keywords: Optional[str] = Query(None, description="Comma-separated"),
-    require_intern: bool = True,
-):
-    locs = search_locations.split(";") if search_locations else None
-    kw = role_keywords.split(",") if role_keywords else None
-    from indeed_worker import BlockedError
-    try:
-        return {"new_matches": indeed_worker.run(
-        search_query=search_query, search_locations=locs,
-        role_keywords=kw, require_intern=require_intern)}
-    except BlockedError:
-        return _blocked_reply("Indeed")
-
 
 @app.get("/run/queens")
 def run_queens():
@@ -96,103 +76,6 @@ def run_queens():
         return {"error": "Queen's session not set up yet -- run queens_login.py first"}
     import queens_worker
     return {"new_matches": queens_worker.run()}
-
-
-@app.get("/run/onq")
-def run_onq():
-    if not (WORKERS_DIR / "onq_session.json").exists():
-        return {"error": "onQ session not set up yet -- run onq_login.py first"}
-    import onq_ics
-    return {"new_items": onq_ics.refresh(force=True)}
-
-
-@app.get("/run/onq_reminders")
-def run_onq_reminders(early_days: int = 2):
-    if not (WORKERS_DIR / "onq_deadlines.db").exists():
-        return {"reminders": []}
-    import onq_ics
-    return {"reminders": onq_ics.get_reminder_touchpoints(early_days=early_days)}
-
-
-@app.get("/health/check")
-def health_check():
-    """Report anything that needs manual re-authentication -- currently just an
-    expired onQ calendar feed. Polled on a schedule and pushed as a Telegram
-    alert when something needs attention.
-
-    The Queen's SWEP check was removed: the VM is permanently Cloudflare-blocked
-    by design (SWEP is scraped via the PC relay instead), so it reported the same
-    known state every single day. An alert you learn to ignore is worse than no
-    alert. Re-add it only if it can report something actionable -- e.g. that the
-    PC relay itself is unreachable."""
-    issues = []
-
-    import onq_ics
-    ok, problem = onq_ics.check_feed_ok()
-    if not ok:
-        issues.append(problem)
-
-    return {"issues": issues}
-
-
-VAULT_SECTIONS = ["Deadlines", "Jobs", "Emails"]
-
-
-@app.get("/vault/search")
-def vault_search(q: str = Query("", description="Keyword to look for anywhere in the vault"),
-                 folder: str = Query("", description="Optional folder to limit the search to"),
-                 limit: int = 20,
-                 section: Optional[str] = Query(None, description="Deprecated shortcut")):
-    """Keyword-search the WHOLE vault. `section` is kept only so older callers
-    don't break -- it just scopes the search to that folder."""
-    import vault
-    try:
-        if section and not q and not folder:
-            return {"query": "", "folder": section,
-                    "results": vault.list_notes(f"{vault.AGENT_FOLDER}/{section}")["notes"]}
-        if section and not folder:
-            folder = f"{vault.AGENT_FOLDER}/{section}"
-        return {"query": q, "folder": folder or "/", "results": vault.search(q, limit, folder)}
-    except (RuntimeError, ValueError) as e:
-        return {"error": str(e), "results": []}
-
-
-@app.get("/vault/read")
-def vault_read(path: str = Query(..., description="Vault-relative path, e.g. 'Personal Agent System/_Home.md'")):
-    """Read one note in full."""
-    import vault
-    try:
-        return vault.read_note(path)
-    except (RuntimeError, ValueError) as e:
-        return {"error": str(e), "content": ""}
-
-
-@app.get("/vault/write")
-def vault_write(path: str = Query(..., description="Vault-relative .md path"),
-                content: str = Query(..., description="Markdown to save"),
-                mode: str = Query("append", description="append | create | overwrite"),
-                title: str = Query("", description="Optional heading for the entry")):
-    """Create, append to, or overwrite a note. Appending is the default because
-    it is the only non-destructive option."""
-    import vault
-    try:
-        return vault.write_note(path, content, mode, title)
-    except (RuntimeError, ValueError) as e:
-        return {"error": str(e)}
-
-
-@app.get("/vault/list")
-def vault_list(folder: str = Query("", description="Folder to list; blank = whole vault"),
-               limit: int = 60):
-    """List notes, most recently edited first."""
-    import vault
-    try:
-        return vault.list_notes(folder, limit)
-    except (RuntimeError, ValueError) as e:
-        return {"error": str(e), "notes": []}
-
-
-PC_QUEENS = os.environ.get("PC_QUEENS_URL", "")
 
 
 @app.get("/jobs/queens")
@@ -302,109 +185,5 @@ def run_job_deadline_reminders(days_ahead: int = 3):
     if not (WORKERS_DIR / "jobs.db").exists():
         return {"reminders": []}
     return {"reminders": job_store.get_upcoming_job_deadlines(days_ahead=days_ahead)}
-
-
-@app.get("/reminders/add")
-def reminders_add(
-    text: str = Query(..., description="What to be reminded of"),
-    kind: str = Query("once", description="once | daily | deadline"),
-    due_date: Optional[str] = Query(None, description="YYYY-MM-DD (once, deadline)"),
-    fire_time: Optional[str] = Query(None, description="HH:MM 24h (once, daily)"),
-    lead_days: int = Query(0, description="deadline: days before due to start showing in the morning digest"),
-):
-    """Save a reminder/to-do. For a deadline, set lead_days to how much runway
-    the task needs (a big assignment gets a larger window than a quick errand).
-    Rejects one-time reminders/deadlines whose moment has already passed so the
-    bot can tell the user instead of saving something that will never fire."""
-    now = datetime.now()
-    if kind in ("once", "deadline") and due_date:
-        try:
-            d = dateparser.parse(due_date).date()
-        except (ValueError, TypeError, OverflowError):
-            d = None
-        if d:
-            if kind == "once" and fire_time:
-                try:
-                    hh, mm = (int(x) for x in fire_time.split(":")[:2])
-                    when = datetime(d.year, d.month, d.day, hh, mm)
-                    # compare at minute granularity so "9:38" is still valid at 9:38:40
-                    if when < now.replace(second=0, microsecond=0):
-                        return {"error": f"That time ({due_date} {fire_time}) has already "
-                                f"passed -- it's {now.strftime('%Y-%m-%d %H:%M')} now. Pick a "
-                                f"future time, or I can set it for tomorrow."}
-                except (ValueError, TypeError):
-                    pass
-            elif d < now.date():
-                label = "due date" if kind == "deadline" else "date"
-                return {"error": f"That {label} ({due_date}) is already in the past -- "
-                        f"it's {now.strftime('%Y-%m-%d')} today."}
-    return {"added": reminders_worker.add(text, kind, due_date, fire_time, lead_days)}
-
-
-@app.get("/reminders/list")
-def reminders_list():
-    return {"reminders": reminders_worker.list_active()}
-
-
-@app.get("/reminders/complete")
-def reminders_complete(id: int):
-    return {"completed": reminders_worker.complete(id)}
-
-
-@app.get("/reminders/delete")
-def reminders_delete(id: int):
-    return {"deleted": reminders_worker.delete(id)}
-
-
-@app.get("/reminders/purge")
-def reminders_purge():
-    """Hard-delete reminders that are 3+ days past: completed ones, and
-    once/deadline items whose date has passed. Never removes 'daily'. Runs
-    automatically once a day via the morning digest; also callable directly."""
-    return {"purged": reminders_worker.purge_expired()}
-
-
-@app.get("/reminders/due")
-def reminders_due():
-    """Point reminders firing right now -- polled every minute by the notifier
-    flow. Returns [] most of the time; sends nothing when empty."""
-    return {"due": reminders_worker.get_due_now()}
-
-
-@app.get("/reminders/digest")
-def reminders_digest():
-    """The consolidated morning message: my reminders + job-application
-    deadlines + onQ deadlines, rolled into ONE text so the notifier bot sends
-    a single push. Returns {'text': '', 'count': 0} when there's nothing."""
-    sections = []
-    count = 0
-
-    # daily housekeeping: clear out reminders that are well past (3-day grace)
-    reminders_worker.purge_expired()
-
-    mine = reminders_worker.get_digest_items()
-    if mine:
-        count += len(mine)
-        sections.append("Reminders & to-dos:\n" + "\n".join(f"- {x}" for x in mine))
-
-    if (WORKERS_DIR / "jobs.db").exists():
-        jobs = job_store.get_upcoming_job_deadlines(days_ahead=3)
-        if jobs:
-            count += len(jobs)
-            lines = [f"- {'TODAY' if j['days_left'] == 0 else str(j['days_left']) + 'd'} "
-                     f"- {j['company']}: {j['title']} -- {j['link']}" for j in jobs]
-            sections.append("Job application deadlines:\n" + "\n".join(lines))
-
-    if (WORKERS_DIR / "onq_session.json").exists():
-        import onq_worker
-        onq = onq_worker.get_reminder_touchpoints(early_days=2)
-        if onq:
-            count += len(onq)
-            lines = [f"- {'TODAY' if r['days_left'] == 0 else str(r['days_left']) + 'd'} "
-                     f"- {r['course']}: {r['title']} ({r['type']})" for r in onq]
-            sections.append("onQ deadlines:\n" + "\n".join(lines))
-
-    text = ("Good morning, master. Here's your day:\n\n" + "\n\n".join(sections)) if count else ""
-    return {"text": text, "count": count}
 
 

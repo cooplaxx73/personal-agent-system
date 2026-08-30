@@ -1,8 +1,8 @@
 """Always-on CLOUD API (Oracle VM): reminders + digest + health. The PC was
-retired 2026-07-23, so jobs/email/onQ now run in the workers API on this same VM
+retired 2026-07-23, so job search runs in the workers API on this same VM
 (:8002), reached over localhost. reminders.db location is set by REMINDERS_DB.
 
-The digest is the one daily briefing: reminders (local) plus school work and job
+The digest is the one daily briefing: reminders (local) plus job application
 deadlines fetched from the workers API. Every notifier message is rendered as
 Telegram HTML with a bold dated title, escaped here rather than in n8n.
 """
@@ -172,11 +172,12 @@ def queue_process():
 
 @app.get("/health/check")
 def health_check():
-    """Session/token health, used by the re-auth alert. The real checks (onQ,
-    Queen's SWEP) live with the workers on :8002; this was hardcoded to an empty list
-    back when they ran on the PC, which silently killed the alert once the
-    PC was retired."""
-    issues = (_workers_get("/health/check", {}) or {}).get("issues") or []
+    """Session/token health, used by the re-auth alert. The only automated check
+    was the onQ calendar feed, removed with onQ itself, so this reports nothing
+    today. The endpoint stays because n8n polls it -- give it something real to
+    check (e.g. whether the PC relay backing Queen's SWEP is reachable) rather
+    than deleting the alert path."""
+    issues = []
     text = ""
     if issues:
         text = (_title("Action Needed") + "\n\nHeads up, master:\n"
@@ -487,16 +488,6 @@ def reminders_digest():
             lines.append(line)
             tracked.append({"id": r["id"], "line": line})
         sections.append("<b>Later Today</b>\n" + "\n".join(lines))
-
-    # two-touch pattern (day-of + early warning) -- matches onq_worker's design
-    onq = (_workers_get("/run/onq_reminders?early_days=2", {}) or {}).get("reminders") or []
-    if onq:
-        items += len(onq)
-        sections.append("<b>School Work Due</b>\n" + "\n".join(
-            "- {} - {}: {} ({})".format(
-                "TODAY" if r.get("days_left") == 0 else f"{r.get('days_left')}d",
-                _esc(r.get("course", "")), _esc(r.get("title", "")), _esc(r.get("type", "")))
-            for r in onq))
 
     jobs = (_workers_get("/run/job_deadline_reminders?days_ahead=3", {}) or {}).get("reminders") or []
     if jobs:

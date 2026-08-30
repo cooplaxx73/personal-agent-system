@@ -10,7 +10,6 @@ from job_store import init_db, is_new, mark_seen
 from workday_worker import WORKDAY_COMPANIES, fetch_workday
 from direct_boards import DIRECT_SOURCES
 from dates import normalize_posted
-import obsidian_writer
 
 GREENHOUSE_COMPANIES = [
     "anthropic", "spacex", "linkedin", "lyft", "airbnb", "stripe", "block",
@@ -134,13 +133,6 @@ def run(
                 mark_seen(job_key, name, title, name, location, link, deadline, posted)
                 new_matches.append({"source": name, "title": title, "location": location,
                                      "link": link, "deadline": deadline, "posted": posted})
-
-    if new_matches and obsidian_writer.VAULT_PATH:
-        lines = [f"- **{m['title']}** ({m['source']}) -- {m['location']}"
-                 + (f" -- posted {m['posted']}" if m.get('posted') else "")
-                 + f" -- {m['link']}"
-                 for m in new_matches]
-        obsidian_writer.append_note("Jobs", "New postings found (Greenhouse/Lever)", "\n".join(lines))
 
     return new_matches
 
