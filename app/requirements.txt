@@ -1,0 +1,21 @@
+# Dependencies for the workers API (app/api.py, :8002) and the LLM gateway
+# (app/llm_gateway.py, :8003). Install into a virtualenv:
+#
+#   python -m venv workers-venv
+#   ./workers-venv/bin/pip install -r app/requirements.txt
+#   ./workers-venv/bin/python -m playwright install chromium
+
+# HTTP API + server
+fastapi==0.139.2
+uvicorn[standard]==0.51.0
+
+# Job board / career API calls, and the LLM gateway's upstream requests
+requests==2.34.2
+
+# Posted-date parsing across sources that each format dates differently
+python-dateutil==2.9.0.post0
+
+# Indeed renders with JavaScript, so it needs a real browser. The pip install
+# only fetches the library -- run the `playwright install chromium` step above
+# to download the browser itself.
+playwright==1.61.0
