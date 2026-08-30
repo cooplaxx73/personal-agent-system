@@ -1,0 +1,43 @@
+{
+  "id": "personal-agent-error-handler",
+  "name": "Personal Agent Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsClass": "",
+        "language": "javaScript",
+        "jsCode": "// Turn a technical n8n error into a clean, friendly message for the user.\nconst exec = $json.execution || {};\nconst failedStep = exec.lastNodeExecuted || 'one of my steps';\nconst rawError = (exec.error && exec.error.message) ? exec.error.message : '';\n\n// Map known failure points to plain-English explanations.\nconst friendly = {\n  'OpenRouter Chat Model': \"my thinking service didn't respond -- this is usually a temporary hiccup or a credit issue on OpenRouter\",\n  'Search Jobs Tool': \"I couldn't reach the company job boards just now\",\n  'Search Indeed Tool': \"I couldn't load the Indeed search just now\",\n  'Search Vault Memory': \"I couldn't read my notes vault just now\",\n  'Fetch onQ Reminders': \"I couldn't check your onQ deadlines\",\n  'Fetch Health Check': \"I couldn't run my status check\",\n  'Fetch Job Deadline Reminders': \"I couldn't check job application deadlines\"\n};\n\nlet reason = friendly[failedStep];\nif (!reason) {\n  if (/ECONNREFUSED|fetch failed|ETIMEDOUT|connect/i.test(rawError)) {\n    reason = \"I couldn't reach one of my helpers -- it may not be running yet\";\n  } else if (/credit|quota|402|payment|insufficient/i.test(rawError)) {\n    reason = \"my thinking service is out of credit -- topping up OpenRouter should fix it\";\n  } else {\n    reason = \"something went sideways on the '\" + failedStep + \"' step\";\n  }\n}\n\nconst message = \"Sorry master, I ran into a problem while working on that. \\n\\n\" +\n  \"What happened: \" + reason + \".\\n\\n\" +\n  \"Please try again in a moment. If it keeps happening, let me know and I'll take a closer look.\";\n\nreturn [{ json: { message } }];"
+      },
+      "id": "build-message",
+      "name": "Build Friendly Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "id": "send-error",
+      "name": "Send Error To Master",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [500, 0],
+      "credentials": { "telegramApi": { "id": "Z7oPXH9KUmaHbVdm", "name": "Telegram Main bot" } }
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Build Friendly Message", "type": "main", "index": 0 }]] },
+    "Build Friendly Message": { "main": [[{ "node": "Send Error To Master", "type": "main", "index": 0 }]] }
+  }
+}

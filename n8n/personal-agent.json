@@ -1,0 +1,788 @@
+[
+  {
+    "updatedAt": "2026-07-26T02:50:29.000Z",
+    "createdAt": "2026-07-20T01:37:49.195Z",
+    "id": "personal-agent-system-workflow-1",
+    "name": "Personal Agent System",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "updates": [
+            "message"
+          ]
+        },
+        "id": "telegram-trigger",
+        "name": "Telegram Trigger",
+        "type": "n8n-nodes-base.telegramTrigger",
+        "typeVersion": 1.1,
+        "webhookId": "",
+        "position": [
+          0,
+          200
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "Z7oPXH9KUmaHbVdm",
+            "name": "Telegram Main bot"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "message",
+          "operation": "sendChatAction",
+          "chatId": "={{ $json.message.chat.id }}",
+          "action": "typing"
+        },
+        "id": "send-typing",
+        "name": "Send Typing",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          250,
+          40
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "Z7oPXH9KUmaHbVdm",
+            "name": "Telegram Main bot"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ 'Today is ' + $now.toISODate() + ' (' + $now.weekdayLong + '), current time ' + $now.toFormat('HH:mm') + '. User message: ' + $('Telegram Trigger').item.json.message.text }}",
+          "options": {
+            "systemMessage": "You are a personal assistant for a student. Call them 'master', warmly and briefly. Keep replies short and plain. Never show raw errors or stack traces -- explain problems calmly. Finish every request in one turn -- never say 'one moment' -- and end with a short confirmation of what you did, or say plainly if you couldn't.\n\nNEVER INVENT JOB DATA. Listings, counts and links exist only in a tool result from this turn; if you have not called a job tool, you have no job data. Never say you will check, or that you have checked, unless you actually called the tool in this turn.\n\nJOB SEARCH: before the FIRST live search in a chat, even when the request seems obvious, do NOT call search_jobs -- first ask ONE short question covering roles, locations and timeframe (which term/season and year, if they have one in mind), offering the defaults (software/backend/developer/engineer internships in toronto/kingston/remote, any timeframe). Search once they answer, accept the defaults, or their message already names them; reuse those choices for the rest of the chat. Report total_matching as the headline number, mentioning new_count only as 'N of them new'. total_matching 0 means nothing on file fits -- say so plainly and suggest widening the terms or timeframe. new_count 0 just means nothing new since the last scan and is normal.\n\nLISTING JOBS: newest first, 15 a page. Start the body with the tool's 'range' line (e.g. '1-15 of 40'), then one job per line: Title - Company - Location - posted <date if given> (add 'apply by <deadline>' only if it has one) - <link>. If has_more is true, end with exactly: 'Say next for more, master.' When they say next/more/continue, call query_jobs again with offset set to the previous next_offset, keeping the same filters.\n\nFORMATTING (applies only to your FINAL message, after any tool results): begin it with\nTITLE: <short title> - <date>\nthen a blank line, then the reply. e.g. 'TITLE: Jobs - 28 Jul'. Everything after the title is plain text -- no markdown, HTML or asterisks.\n\nMESSY INPUT: messages are often rushed and mistyped. Work out the intent and act on it, keeping every specific detail (roles, places, terms). Only ask when it is genuinely unclear, and then still do the obvious part -- ask ONE short question in plain words, never naming your tools. If they want something none of your tools can do, say so plainly in one line.\n\nREMINDERS: you don't set reminders. For anything to set/list/complete a reminder, or to add something to the daily digest, point them to the reminder bot @SCHEDULEPLS_bot."
+          }
+        },
+        "id": "ai-agent",
+        "name": "AI Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 2.2,
+        "position": [
+          250,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "modelName": "models/gemini-flash-latest",
+          "options": {}
+        },
+        "id": "chat-model",
+        "name": "Gemini Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+        "typeVersion": 1,
+        "position": [
+          150,
+          420
+        ],
+        "credentials": {
+          "googlePalmApi": {
+            "id": "geminiApiCred01",
+            "name": "Gemini API"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "toolDescription": "Fresh LIVE search of company career sites. Params: role_keywords (comma-separated, default software,backend,developer,engineer), require_intern (true/false, default true -- false for non-intern roles), locations (comma-separated, default toronto,kingston,remote), timeframe (the term the job runs in). LEAVE timeframe OUT unless the user themselves named a term in this conversation -- never guess or copy an example, because a wrong timeframe silently hides real jobs. Returns total_matching (the number to report), new_count (0 is normal), and matches.",
+          "url": "http://localhost:8002/run/jobs",
+          "method": "GET",
+          "sendQuery": true,
+          "specifyQuery": "keypair",
+          "parametersQuery": {
+            "values": [
+              {
+                "name": "role_keywords",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "require_intern",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "locations",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "timeframe",
+                "valueProvider": "modelOptional"
+              }
+            ]
+          }
+        },
+        "id": "tool-jobs",
+        "name": "search_jobs",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "typeVersion": 1.1,
+        "position": [
+          350,
+          440
+        ]
+      },
+      {
+        "parameters": {
+          "toolDescription": "List ALREADY-stored jobs (no live search), newest first. Filters: keywords (comma-separated, matched against titles), location (comma-separated), company, posted_within_days, timeframe (only if the user named one). Returns 15 per page with range, has_more and next_offset; for the next page pass offset = the previous next_offset.",
+          "url": "http://localhost:8002/jobs/query",
+          "method": "GET",
+          "sendQuery": true,
+          "specifyQuery": "keypair",
+          "parametersQuery": {
+            "values": [
+              {
+                "name": "keywords",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "location",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "company",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "posted_within_days",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "sort",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "offset",
+                "valueProvider": "modelOptional"
+              },
+              {
+                "name": "timeframe",
+                "valueProvider": "modelOptional"
+              }
+            ]
+          }
+        },
+        "id": "tool-query-jobs",
+        "name": "query_jobs",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "typeVersion": 1.1,
+        "position": [
+          650,
+          440
+        ]
+      },
+      {
+        "parameters": {
+          "toolDescription": "Hide stored job listings. contains=text to match; field=title|company|location|any. Reversible.",
+          "url": "http://localhost:8002/jobs/dismiss",
+          "method": "GET",
+          "sendQuery": true,
+          "specifyQuery": "keypair",
+          "parametersQuery": {
+            "values": [
+              {
+                "name": "contains",
+                "valueProvider": "modelRequired"
+              },
+              {
+                "name": "field",
+                "valueProvider": "modelOptional"
+              }
+            ]
+          }
+        },
+        "id": "tool-dismiss-jobs",
+        "name": "dismiss_jobs",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "typeVersion": 1.1,
+        "position": [
+          800,
+          440
+        ]
+      },
+      {
+        "parameters": {
+          "sessionIdType": "customKey",
+          "sessionKey": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+          "contextWindowLength": 10
+        },
+        "id": "chat-memory",
+        "name": "Chat Memory",
+        "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+        "typeVersion": 1.4,
+        "position": [
+          50,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+          "text": "={{ $json.formatted }}",
+          "additionalFields": {
+            "appendAttribution": false,
+            "parse_mode": "HTML"
+          }
+        },
+        "id": "send-telegram",
+        "name": "Send Telegram Reply",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          550,
+          200
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "Z7oPXH9KUmaHbVdm",
+            "name": "Telegram Main bot"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "30 7 * * *"
+              }
+            ]
+          }
+        },
+        "id": "morning-trigger",
+        "name": "Morning Trigger (8am)",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          620
+        ]
+      },
+      {
+        "parameters": {
+          "url": "http://localhost:8001/reminders/digest",
+          "options": {}
+        },
+        "id": "fetch-digest",
+        "name": "Fetch Morning Digest",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          250,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.count }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "has-digest-if",
+        "name": "Anything to send?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          500,
+          560
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "YOUR_TELEGRAM_CHAT_ID",
+          "text": "={{ $json.text }}",
+          "additionalFields": {
+            "appendAttribution": false,
+            "parse_mode": "HTML"
+          }
+        },
+        "id": "send-digest",
+        "name": "Send Morning Digest",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          750,
+          560
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "NmmBmrsxBd3y2GuG",
+            "name": "Telegram Notis bot"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 1
+              }
+            ]
+          }
+        },
+        "id": "point-trigger",
+        "name": "Point Reminder Poll (1 min)",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          960
+        ]
+      },
+      {
+        "parameters": {
+          "url": "http://localhost:8001/reminders/due",
+          "options": {}
+        },
+        "id": "fetch-due",
+        "name": "Fetch Due Reminders",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          250,
+          960
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.due.length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "has-due-if",
+        "name": "Any due now?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          500,
+          960
+        ]
+      },
+      {
+        "parameters": {
+          "chatId": "YOUR_TELEGRAM_CHAT_ID",
+          "text": "={{ $json.text }}",
+          "additionalFields": {
+            "appendAttribution": false,
+            "parse_mode": "HTML"
+          }
+        },
+        "id": "send-point",
+        "name": "Send Point Reminder",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          750,
+          960
+        ],
+        "credentials": {
+          "telegramApi": {
+            "id": "NmmBmrsxBd3y2GuG",
+            "name": "Telegram Notis bot"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Telegram HTML parse_mode is strict -- one stray & or < and the whole message\n// is rejected and the user gets nothing. So escape everything the agent wrote.\n// The agent emits an optional \"TITLE: ...\" first line; that becomes the heading.\nconst esc = (s) => String(s)\n  .replace(/&/g, '&amp;')\n  .replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;');\n\nconst out = [];\nfor (const item of $input.all()) {\n  const raw = String(item.json.output ?? '').trim();\n  const m = raw.match(/^TITLE:\\s*([^\\n]+)\\n?([\\s\\S]*)$/);\n  let formatted;\n  if (m) {\n    const body = esc((m[2] || '').trim());\n    formatted = '<b>' + esc(m[1].trim()) + '</b>' + (body ? '\\n\\n' + body : '');\n  } else {\n    // agent skipped the title -- degrade to plain escaped text rather than fail\n    formatted = esc(raw);\n  }\n  out.push({ json: { formatted, output: raw } });\n}\nreturn out;\n"
+        },
+        "id": "format-reply-node-0001",
+        "name": "Format Reply",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "url": "http://localhost:8001/notify/record",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "render_id",
+                "value": "={{ $('Fetch Morning Digest').item.json.render_id }}"
+              },
+              {
+                "name": "chat_id",
+                "value": "={{ $json.chat?.id ?? $json.result?.chat?.id }}"
+              },
+              {
+                "name": "message_id",
+                "value": "={{ $json.message_id ?? $json.result?.message_id }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "record-digest-sent-0001",
+        "name": "Record Digest Sent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          950,
+          560
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "http://localhost:8001/notify/record",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "render_id",
+                "value": "={{ $('Fetch Due Reminders').item.json.render_id }}"
+              },
+              {
+                "name": "chat_id",
+                "value": "={{ $json.chat?.id ?? $json.result?.chat?.id }}"
+              },
+              {
+                "name": "message_id",
+                "value": "={{ $json.message_id ?? $json.result?.message_id }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "record-reminder-sent-0001",
+        "name": "Record Reminder Sent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          950,
+          960
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "mode": "id",
+            "value": "auto"
+          },
+          "options": {
+            "baseURL": "http://localhost:8003/v1"
+          },
+          "responsesApiEnabled": false
+        },
+        "id": "llm-gateway-node-0001",
+        "name": "LLM Gateway",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "typeVersion": 1.3,
+        "position": [
+          150,
+          580
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "llmGatewayCred01",
+            "name": "LLM Gateway (local)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "toolDescription": "Search Queen's SWEP student job portal. ALWAYS returns a 'message' field -- relay it to the user word-for-word; it handles PC-off, sign-in-needed and found-N itself.",
+          "url": "http://localhost:8002/jobs/queens",
+          "method": "GET"
+        },
+        "id": "tool-search-queens",
+        "name": "search_queens",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "typeVersion": 1.1,
+        "position": [
+          1640,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Telegram Trigger": {
+        "main": [
+          [
+            {
+              "node": "Send Typing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Typing": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Chat Memory": {
+        "ai_memory": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_memory",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Agent": {
+        "main": [
+          [
+            {
+              "node": "Format Reply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Morning Trigger (8am)": {
+        "main": [
+          [
+            {
+              "node": "Fetch Morning Digest",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Morning Digest": {
+        "main": [
+          [
+            {
+              "node": "Anything to send?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Anything to send?": {
+        "main": [
+          [
+            {
+              "node": "Send Morning Digest",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Point Reminder Poll (1 min)": {
+        "main": [
+          [
+            {
+              "node": "Fetch Due Reminders",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Due Reminders": {
+        "main": [
+          [
+            {
+              "node": "Any due now?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Any due now?": {
+        "main": [
+          [
+            {
+              "node": "Send Point Reminder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Format Reply": {
+        "main": [
+          [
+            {
+              "node": "Send Telegram Reply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Morning Digest": {
+        "main": [
+          [
+            {
+              "node": "Record Digest Sent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Point Reminder": {
+        "main": [
+          [
+            {
+              "node": "Record Reminder Sent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM Gateway": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "search_jobs": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "query_jobs": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "dismiss_jobs": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "search_queens": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "errorWorkflow": "personal-agent-error-handler"
+    },
+    "staticData": null,
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "nodeGroups": [],
+    "pinData": {},
+    "versionId": "718be4b0-abaa-4f90-8746-c87da985ead7",
+    "activeVersionId": "718be4b0-abaa-4f90-8746-c87da985ead7",
+    "versionCounter": 68,
+    "triggerCount": 3,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-07-20T01:37:49.199Z",
+        "createdAt": "2026-07-20T01:37:49.199Z",
+        "role": "workflow:owner",
+        "workflowId": "personal-agent-system-workflow-1",
+        "projectId": "8I0ZxbnElp5fPh6z",
+        "project": {
+          "updatedAt": "2026-07-20T03:09:06.344Z",
+          "createdAt": "2026-07-20T01:31:39.726Z",
+          "id": "8I0ZxbnElp5fPh6z",
+          "name": "Telegram account",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "4acc6b7c-fa9b-4272-ba23-b5f67de6f942"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]
