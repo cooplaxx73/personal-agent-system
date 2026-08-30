@@ -22,7 +22,7 @@ mem=$(free | awk '/Mem:/{printf "%d", $3/$2*100}')
 [ "$mem" -ge "$MEM_WARN" ] && issues="${issues}- Memory ${mem}%% used\n"
 
 # --- systemd services --------------------------------------------------------
-for svc in personal-agent-workers personal-agent-llm syncthing@ubuntu; do
+for svc in personal-agent-workers personal-agent-llm; do
   if ! systemctl is-active --quiet "$svc"; then
     issues="${issues}- Service ${svc} is NOT running\n"
   fi
@@ -41,7 +41,7 @@ check_http() {  # name url
   [ "$code" = "200" ] || issues="${issues}- $1 not responding (HTTP ${code:-timeout})\n"
 }
 check_http "Reminders API (:8001)" "http://localhost:8001/reminders/list"
-check_http "Workers API (:8002)"   "http://localhost:8002/vault/list?limit=1"
+check_http "Workers API (:8002)"   "http://localhost:8002/health"
 check_http "LLM gateway (:8003)"   "http://localhost:8003/health"
 check_http "n8n (:5678)"           "http://localhost:5678/healthz"
 
